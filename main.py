@@ -1,113 +1,192 @@
-from flask import Flask, request, redirect, render_template
-from datetime import datetime
+from flask import Flask, request, redirect, render_template, session, flash
 from flask_sqlalchemy import SQLAlchemy
-#import cgi
 import os
 import jinja2
-
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://blogz:homer@localhost:8889/blogz'
 app.config['SQLALCHEMY_ECHO'] = True
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-#SQLALCHEMY_TRACK_MODIFICATIONS = False
 db = SQLAlchemy(app)
-
-
-template_dir = os.path.join(os.path.dirname(__file__), "templates")
-jinja_env = jinja2.Environment(loader = jinja2.FileSystemLoader(template_dir), autoescape=True)
-
-#app = Flask(__name__)
-#app.config['DEBUG'] = True
+app.secret_key = 'y337kGcys&zP3B'
 
 class Blog(db.Model):
 
-    post_id = db.Column(db.Integer, primary_key=True)
-    post_title = db.Column(db.String(120))
-    post_body = db.Column(db.String(120))
-    #post_date = datetime.utcnow()
-    post_date = db.Column(db.DateTime)
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.Text) 
+    post = db.Column(db.Text)  
+    owner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
-    #def __init__(self, name):
-        #self.name = name
-    def __init__(self, title, body, date ):
-        self.title = post_title 
-        self.body = post_body
-        self.date = datetime.utcnow()
+    def __init__(self, title, post, owner):
+        self.title = title
+        self.post = post 
+        self.owner = owner
 
 
-#@app.route('/', methods=['POST', 'GET'])
-@app.route('/',)
+class User(db.Model):
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(120), unique=True)
+    password = db.Column(db.String(120))
+    blogs = db.relationship('Blog', backref='owner')
+
+    def __init__(self, username, password):
+        self.username = username
+        self.password = password
+
+@app.before_request
+def require_login():
+    allowed_routes = ['login_user', 'show_blog', 'add_user', 'index', 'static']
+    if request.endpoint not in allowed_routes and 'username' not in session:
+        return redirect('/login')
+
+@app.route('/')
 def index():
-    template = jinja_env.get_template("blog.html")
-    return template.render()
+    all_users = User.query.distinct()
+    return render_template('index.html', list_all_users=all_users)
 
-@app.route('/blog', methods=['GET', 'POST'])
-def blog():
-    if request.method == 'POST':
-        post_name = request.form['post']
-        new_post = post(post_name)
-        db.session.add(new_post)
-        db.session.commit()
+@app.route('/blog')
+def show_blog():
+    post_id = request.args.get('id')
+    single_user_id = request.args.get('owner_id')
+    if (post_id):
+        single = Blog.query.get(post_id)
+        #return render_template('single_post.html', post_id=single)
+        #return render_template('single_post.html', posts=single)
+        return render_template('single_post.html', single=single)
+        #return render_template('single_post.html', owner_id=owner_id)
+        #return render_template('single_post.html', blog=blog)
+        #return render_template('single_post.html')
     else:
-        ##posts = Blog.query.fetchall()
-        ##posts = Blog.fetchall()
-        posts = Blog.query.all()
-        ##completed_tasks = Task.query.filter_by(completed=True).all()
-        return render_template('blog.html',title="Blog Posts!",posts=posts) #completed_tasks=completed_tasks)
+        if (single_user_id):
+            ind_user_blog_posts = Blog.query.filter_by(owner_id=single_user_id)
+            return render_template('singleUser.html', posts=ind_user_blog_posts)
+        else:
+            all_blog_posts = Blog.query.all()
+            return render_template('blog.html', posts=all_blog_posts)
+
+# Empty field toggle
+def empty_field(f):
+    if f:
+        return True
+    else:
+        return False
+
+@app.route('/newpost', methods=['POST', 'GET'])
+def add_entry():
+
+    if request.method == 'POST':
+
+        post_title = request.form['blog_title']
+        post_entry = request.form['blog_post']
+        owner = User.query.filter_by(username=session['username']).first()
+        post_new = Blog(post_title, post_entry, owner)
+
+        if empty_field(post_title) and empty_field(post_entry): 
+            db.session.add(post_new)
+            db.session.commit()
+            post_link = "/blog?id=" + str(post_new.id)
+            return redirect(post_link)
+        else:
+            if not empty_field(post_title) and not empty_field(post_entry):
+                flash('Please enter a title and blog entry', 'error')
+                return render_template('newpost.html', post_title=post_title, post_entry=post_entry)
+            elif not empty_field(post_title):
+                flash('Please enter a title', 'error')
+                return render_template('newpost.html', post_entry=post_entry)
+            elif not empty_field(post_entry):
+                flash('Please enter a blog entry', 'error')
+                return render_template('newpost.html', post_title=post_title)
+
+    else:
+        return render_template('newpost.html')
 
 
-@app.route('/new_post', methods=['POST'])
-def new_post():
-    template = jinja_env.get_template("new_post.html")
-    return template.render()
+@app.route('/signup', methods=['POST', 'GET'])
+def add_user():
 
+    if request.method == 'POST':
+
+        user_name = request.form['username']
+        user_password = request.form['password']
+        user_password_validate = request.form['password_validate']
+
+
+        if not empty_field(user_name) or not empty_field(user_password) or not empty_field(user_password_validate):
+            flash('All fields must be filled in', 'error')
+            return render_template('signup.html')
+
+        if user_password != user_password_validate:
+            flash('Passwords must match', 'error')
+            return render_template('signup.html')
+
+        if len(user_password) < 3 and len(user_name) < 3:
+            flash('Username and password must be at least three characters', 'error')
+            return render_template('signup.html')
+
+        if len(user_password) < 3:
+            flash('Password must be at least three characters', 'error')
+            return render_template('signup.html')
+
+        if len(user_name) < 3:
+            flash('Username must be at least three characters', 'error')
+            return render_template('signup.html')
+
+        existing_user = User.query.filter_by(username=user_name).first()
+        if not existing_user: 
+            user_new = User(user_name, user_password) 
+            db.session.add(user_new)
+            db.session.commit()
+            session['username'] = user_name
+            flash('New user created', 'success')
+            return redirect('/newpost')
+        else:
+            flash('Error! User already exists!', 'error')
+            return render_template('signup.html')
+
+    else:
+        return render_template('signup.html')
+
+
+@app.route('/login', methods=['POST', 'GET'])
+def login_user():
+    if request.method == 'POST':
+       
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username and not password:
+            flash('Username and password cannot be blank', 'error')
+            return render_template('login.html')
+        if not username:
+            flash('Username cannot be blank', 'error')
+            return render_template('login.html')
+        if not password:
+            flash('Password cannot be blank', 'error')
+            return render_template('login.html')
+        
+        user = User.query.filter_by(username=username).first()
+
+        if not user:
+            flash('Username does not exist', 'error')
+            return render_template('login.html')
+
+        if user.password != password:
+            flash('Password is incorrect', 'error')
+            return render_template('login.html')
+
+        if user and user.password == password:
+            session['username'] = username
+            return redirect('newpost')
+
+    return render_template('login.html')
+        
+@app.route('/logout')
+def logout():
+    del session['username']
+    flash('You are logged out', 'success')
+    return redirect('/blog')
 
 if __name__ == '__main__':
     app.run()
-    
-    #posts = Post.query.filter_by(completed=False).all()
-    #completed_tasks = Post.query.filter_by(completed=True).all()
-    #return render_template('posts.html',title="Get It Done!", 
-        #posts=posts, completed_posts=completed_posts)
-
-#return redirect('/')
-
-# TODO The /blog route displays all the blog posts.
-
-
-# TODO You're able to submit a new post at the /newpost route. 
-# After submitting a new post, your app displays the main blog page.
-
-# TODO You have two templates, one each for the /blog (main blog listings) 
-# and /newpost (post new blog entry) views. 
-# Your templates should extend a base.html template which includes some 
-# boilerplate HTML that will be used on each page.
-
-# TODO In your base.html template, you have some navigation links that 
-# link to the main blog page and to the add new blog page.
-
-# TODO If either the blog title or blog body is left empty in the new post form, 
-# the form is rendered again, with a helpful error message and any 
-# previously-entered content in the same form inputs.
-
-# TODO For both use cases we need to create the template for the page that will display an individual blog, 
-# so start by making that. All it need do is display a blog title and blog body. 
-# Next, we'll tackle the use cases one at a time.
-
-# TODO Use Case 1: 
-# We click on a blog entry's title on the main page and go to a blog's individual entry page.
-
-# TODO Use Case 2: 
-# After adding a new blog post, instead of going back to the main page, 
-# we go to that blog post's individual entry page.
-
-# TODO Bonus Missions 
-# 1. Add a CSS stylesheet to improve the style of your app. You can read about how to do so here.
-
-# 2. Display the posts in order of most recent to the oldest (the opposite of the current order). 
-# You can either use the id property that has been created using auto-incrementing, 
-# or - a more sophisticated method - you can add a DateTime property to the Blog class 
-# (and drop and re-create the table) that will store the date the post was created in the database. 
-# For an example of an app with a DateTime column, check out this quickstart guide.
