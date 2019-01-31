@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block content %}    
+    <h2>New Post</h2>
+    <form action="/newpost" method='POST'>
+
+        <p class="flash">
+        </p>
+        <p>
+        <label>
+            <span class="form_label">Title</span>
+            <p><input name="blog_title" type="text" value="{{post_title}}"></p>
+        </label>
+        </p>
+        <p>
+        <label>
+            <span class="form_label">Post</span>
+        </p><textarea name="blog_post" type="textarea" rows="10">{{post_entry}}</textarea></p>
+        </label>
+        </p>
+        <p>
+        <input class="submit" type="submit" value="Submit" />
+        </p>
+    </form>
+
+{% endblock %} 
